@@ -12,7 +12,8 @@ from phase_core import (
     EnergyRow, analyze_scenarios, check_cell_stoichiometry,
     rows_from_json, rows_to_json, target_eV_per_atom,
 )
-from mp_backend import fetch_all_mp, fetch_task_audit
+from mp_backend import fetch_all_mp, fetch_task_audit, verify_material_id
+from mp_identifiers import material_url
 from result_display import product_breakdown, reaction_text, verdict
 
 st.set_page_config(page_title='Competing Phases · 0 K', page_icon='⚛️', layout='wide')
@@ -30,7 +31,8 @@ SOURCES = {
 
 def display_rows(rows: list[EnergyRow]) -> pd.DataFrame:
     return pd.DataFrame([{
-        'MP ID': r.mp_id,
+        'MP Number（数字材料编号）': r.mp_id,
+        'MP API 原始 Material ID': r.mp_id_api or r.mp_id,
         '相': r.formula,
         '空间群': r.spacegroup,
         '★': '★' if r.energy_source != 'user_custom' and r.experimental_flag is True else '',
@@ -41,10 +43,11 @@ def display_rows(rows: list[EnergyRow]) -> pd.DataFrame:
         '原始计算胞总能 eV': r.dft_total_energy_eV,
         '计算胞原子数': r.dft_cell_atoms,
         '修正量 eV/atom': r.correction_per_atom,
-        'task ID': r.task_id,
+        'Task Number（计算任务）': r.task_id,
+        'Task ID（API 原始）': r.task_id_api or r.task_id,
         'POTCAR': r.potcar,
         'Hubbard U': r.hubbards,
-        'MP URL': f'https://materialsproject.org/materials/{r.mp_id}' if r.mp_id.startswith('mp-') else '',
+        'MP URL': material_url(r.mp_id),
         '备注': r.note,
     } for r in rows])
 
@@ -104,8 +107,8 @@ def show_scenario(s, target_formula: str, target_e_atom: float, num_atoms: int,
             coeff.markdown(f'**组合系数：{row["coefficient_label"]}**')
             energy.write(f'{row["energy_eV_atom"]:.6f} eV/atom')
             star = '★ 实验结构' if row['evidence'] == 'experimental-linked' else '理论/未标记结构'
-            if row['mp_id'].startswith('mp-'):
-                src.markdown(f'[{row["mp_id"]}](https://materialsproject.org/materials/{row["mp_id"]}) · {star}')
+            if material_url(row['mp_id']):
+                src.markdown(f'[{row["mp_id"]}]({material_url(row["mp_id"])}) · {star}')
             else:
                 src.caption(f'{row["mp_id"]} · {star}')
 
@@ -126,7 +129,9 @@ def show_scenario(s, target_formula: str, target_e_atom: float, num_atoms: int,
                            file_name='selected_stability_result.csv', mime='text/csv')
         with st.expander('查看能量加权、原子守恒残差和分解贡献（用于论文核查）'):
             contributions = pd.DataFrame([{
-                '竞争相': p['phase'], 'MP ID': p['mp_id'],
+                '竞争相': p['phase'], 'MP Number': p['mp_id'],
+                'MP API Material ID': p['mp_id_api'],
+                'Task Number': p['task_id'], 'Task API ID': p['task_id_api'],
                 '反应系数': p['coefficient'], '原子占比': p['atom_fraction'],
                 '单相能量 (eV/atom)': p['energy_eV_atom'],
                 '组合贡献 (eV/atom)': p['energy_contribution_eV_atom'],
@@ -333,20 +338,38 @@ if valid:
 
 st.divider()
 with st.expander('④ 展开完整 MP 晶型与多泛函能量表（用于核查/下载）', expanded=False):
-    st.caption('计算结果无需阅读下面的大表。此处保留所有已检索晶型、MP ID、计算方法、原始总能与 POTCAR。')
+    st.caption('MP Number = 数字格式 material_id（结构编号）；MP API Material ID = 原始字母或数字结构编号；Task ID = 某一次 DFT 计算任务编号。两种 ID 不应混淆。')
     full = display_rows(rows)
     preview_method = st.multiselect('过滤方法（只影响表格，不影响上方计算）',
         options=sorted(set(full['方法'].dropna())), default=sorted(set(full['方法'].dropna())))
     st.dataframe(full[full['方法'].isin(preview_method)], use_container_width=True,
-                 hide_index=True, height=400)
+                 hide_index=True, height=400,
+                 column_config={'MP URL': st.column_config.LinkColumn('MP 材料详情')})
     st.download_button('下载完整相能量 CSV', full.to_csv(index=False).encode('utf-8-sig'),
                        file_name='mp_all_structure_energies.csv', mime='text/csv')
     st.download_button('保存相库 JSON（下次免 API 重查）', rows_to_json(rows, meta),
                        file_name='mp_phase_database.json', mime='application/json')
     st.caption('★ = MP summary.theoretical=False；MP 结构有实验观测证据，但所列能量仍然是 DFT 值。')
 
-with st.expander('⑤ 高级核查：查看 MP 同一结构的全部 VASP 计算任务', expanded=False):
-    material_ids = sorted({r.mp_id for r in rows if r.mp_id.startswith('mp-')})
+with st.expander('⑤ MP 编号核验：输入 MP 官网的数字编号，在线核对结构', expanded=False):
+    st.caption('可输入 mp-149 或 mp-aaaaaaft。此核验从 MP summary 实时读取材料身份，不会用 Task ID 冒充 Material ID。')
+    check_id = st.text_input('需要核对的 Material ID', placeholder='mp-149', key='check_mpid')
+    if st.button('查询 MP 官网对应的材料', disabled=not (api_key and check_id)):
+        try:
+            checked_id = verify_material_id(api_key, check_id)
+            st.write(f'**MP Number：{checked_id["material_id"]}** ｜ API ID：{checked_id["api_material_id"]}')
+            st.write(f'化学式：{checked_id["formula"]}；空间群：{checked_id["spacegroup"]}')
+            if checked_id['starred'] is True:
+                st.caption('★ 实验观测结构（theoretical=False）')
+            elif checked_id['starred'] is False:
+                st.caption('理论结构（theoretical=True）')
+            if checked_id['url']:
+                st.link_button('打开该 MP 材料详情页', checked_id['url'])
+        except Exception as exc:
+            st.error(f'编号核验失败：{type(exc).__name__}: {exc}')
+
+with st.expander('⑥ 高级核查：查看 MP 同一结构的全部 VASP 计算任务', expanded=False):
+    material_ids = sorted({r.mp_id for r in rows if material_url(r.mp_id)})
     selected_ids = st.multiselect('MP IDs（一次最多 20 个）', material_ids, max_selections=20)
     if st.button('查询 VASP task 数据', disabled=not(api_key and selected_ids)):
         try:
@@ -361,6 +384,6 @@ with st.expander('⑤ 高级核查：查看 MP 同一结构的全部 VASP 计算
         st.download_button('导出计算任务 CSV', audit.to_csv(index=False).encode('utf-8-sig'),
                            file_name='mp_vasp_tasks.csv', mime='text/csv')
 
-st.caption('ΔE = E(目标 DFT)/atom − E(最低竞争相组合)/atom。ΔE < 0 ⇒ 在已选择 MP 候选相内预测稳定；'
+st.caption('V5 修正 MP 2026 AlphaID / 数字 ID 显示与材料—计算任务关联。ΔE = E(目标 DFT)/atom − E(最低竞争相组合)/atom。ΔE < 0 ⇒ 在已选择 MP 候选相内预测稳定；'
            'ΔE > 0 ⇒ 预测不稳定；ΔE = 0 ⇒ 临界。此判定为 0 K 的相对能量判定，'
            '并未证明动力学可合成性，且跨数据集总能可能不兼容。')

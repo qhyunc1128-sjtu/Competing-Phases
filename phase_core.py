@@ -16,6 +16,7 @@ from scipy.optimize import linprog
 
 # Reuse original project's explicitly validated fractional formula parser.
 from formula_utils import parse_formula, atom_fractions, same_stoichiometry
+from mp_identifiers import material_id_legacy, task_id_legacy
 
 
 class CompetingPhaseError(ValueError):
@@ -40,6 +41,8 @@ class EnergyRow:
     dft_cell_atoms: float | None = None
     dft_total_energy_eV: float | None = None
     note: str = ""
+    mp_id_api: str = ""  # exact returned ID, e.g. mp-aaaaaaft
+    task_id_api: str = ""  # exact returned task ID, e.g. aaaftppd
 
     def __post_init__(self):
         if not isinstance(self.composition, dict) or not self.composition:
@@ -64,6 +67,8 @@ class Product:
     energy_per_atom: float
     atom_fraction: float
     coefficient_per_target_formula: float
+    mp_id_api: str = ""
+    task_id_api: str = ""
 
 
 @dataclass
@@ -186,6 +191,7 @@ def solve_minimum(target_comp: Mapping[str, float], candidates: Sequence[EnergyR
                 energy_per_atom=r.energy_per_atom,
                 atom_fraction=float(w),
                 coefficient_per_target_formula=float(w * denom / atom_count(r.composition)),
+                mp_id_api=r.mp_id_api, task_id_api=r.task_id_api,
             ))
     return Mixture(energy_per_atom=float(c @ ans.x), products=products, max_residual=residual)
 
@@ -236,4 +242,17 @@ def rows_from_json(blob: bytes | str) -> tuple[list[EnergyRow], dict[str, Any]]:
     data = json.loads(blob)
     if not isinstance(data, dict) or not isinstance(data.get('records'), list):
         raise ValueError('Invalid saved phase JSON')
-    return [EnergyRow(**r) for r in data['records']], data.get('metadata') or {}
+    restored = []
+    for r in data['records']:
+        # Migrate V2-V4 JSON safely. Preserve original API identifiers while
+        # normalizing material and task IDs separately for cross-endpoint joins.
+        r = dict(r)
+        if r.get('energy_source') in ('core_raw', 'thermo_corrected'):
+            old_mid = r.get('mp_id', '')
+            r['mp_id_api'] = r.get('mp_id_api') or old_mid
+            r['mp_id'] = material_id_legacy(old_mid)
+            old_tid = r.get('task_id', '')
+            r['task_id_api'] = r.get('task_id_api') or old_tid
+            r['task_id'] = task_id_legacy(old_tid)
+        restored.append(EnergyRow(**r))
+    return restored, data.get('metadata') or {}

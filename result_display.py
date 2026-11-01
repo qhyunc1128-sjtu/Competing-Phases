@@ -46,6 +46,8 @@ def product_breakdown(formula: str, mixture: Mixture) -> list[dict]:
             'coefficient': p.coefficient_per_target_formula,
             'coefficient_label': format_number(p.coefficient_per_target_formula),
             'mp_id': p.mp_id,
+            'mp_id_api': p.mp_id_api,
+            'task_id_api': p.task_id_api,
             'evidence': p.evidence,
             'energy_eV_atom': p.energy_per_atom,
             'energy_contribution_eV_atom': p.coefficient_per_target_formula * n / N * p.energy_per_atom,

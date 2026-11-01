@@ -15,6 +15,7 @@ from typing import Any
 
 from formula_utils import parse_formula
 from phase_core import EnergyRow
+from mp_identifiers import material_id_legacy, task_id_legacy, material_url
 
 THERMO_TYPES = ("GGA_GGA+U", "GGA_GGA+U_R2SCAN", "r2SCAN")
 MAX_ELEMENTS = 9  # explicit safe upper bound; 7–9 element queries can be very slow
@@ -84,7 +85,8 @@ def _summary_map(mpr, subsystems: list[str], include_gnome: bool) -> dict[str, d
             chunk_size=1000,
         )
         for d in docs:
-            mid = _scalar(_value(d, 'material_id'))
+            api_mid = _scalar(_value(d, 'material_id'))
+            mid = material_id_legacy(api_mid)
             sym = _value(d, 'symmetry')
             theoretical = _value(d, 'theoretical')
             if theoretical is True:
@@ -94,6 +96,7 @@ def _summary_map(mpr, subsystems: list[str], include_gnome: bool) -> dict[str, d
             else:
                 evidence = 'unknown'
             meta[mid] = {
+                'api_id': api_mid,
                 'formula': str(_value(d, 'formula_pretty') or ''),
                 'composition': _formula(_value(d, 'composition'), str(_value(d, 'formula_pretty') or '')),
                 'evidence': evidence,
@@ -122,7 +125,9 @@ def _entry_to_record(mid: str, run_type: str, entry: Any, s: dict) -> EnergyRow 
         params = getattr(obj, 'parameters', {}) or {}
         data = getattr(obj, 'data', {}) or {}
         comp = _formula(getattr(obj, 'composition', None), s['formula'])
-        task_id = _scalar(data.get('task_id', ''))
+        # A ComputedEntry commonly carries the calculation identifier in
+        # entry_id, whereas data.task_id is not guaranteed to be populated.
+        task_id = _scalar(data.get('task_id') or getattr(obj, 'entry_id', '') or '')
     except (ImportError, ValueError, TypeError, AttributeError, KeyError):
         # A legacy serialized representation may not round-trip through the
         # current model. Handle its numeric fields with explicit correction.
@@ -136,16 +141,18 @@ def _entry_to_record(mid: str, run_type: str, entry: Any, s: dict) -> EnergyRow 
         raw_cell_energy = float(e) - correction
         raw_cell_atoms = float(sum(comp.values()))
         energy = raw_cell_energy / raw_cell_atoms
-        task_id = _scalar(data.get('task_id', ''))
+        task_id = _scalar(data.get('task_id') or _value(entry, 'entry_id') or '')
     if not isfinite(energy):
         return None
     actual_run = _scalar(params.get('run_type')) or run_type
+    legacy_tid = task_id_legacy(task_id)
     return EnergyRow(
         formula=s['formula'] or ''.join(f'{k}{v:g}' for k, v in comp.items()),
         composition=comp, energy_per_atom=energy, mp_id=mid,
         energy_source='core_raw', method=actual_run,
         evidence=s['evidence'], experimental_flag=s['experimental_flag'],
-        spacegroup=s['spacegroup'], task_id=task_id,
+        spacegroup=s['spacegroup'], task_id=legacy_tid,
+        mp_id_api=s.get('api_id', mid), task_id_api=task_id,
         potcar=_potcar_text(params.get('potcar_spec')),
         hubbards=_hubbards_text(params.get('hubbards')),
         dft_cell_atoms=raw_cell_atoms, dft_total_energy_eV=raw_cell_energy,
@@ -164,6 +171,7 @@ def fetch_all_mp(api_key: str, elements: list[str], *, include_gnome: bool = Tru
     records: list[EnergyRow] = []
     with MPRester(api_key=api_key.strip(), use_document_model=False) as mpr:
         summaries = _summary_map(mpr, subsystems, include_gnome)
+        mp_db_version = getattr(mpr, 'db_version', None)
         mids = sorted(summaries)
         if not mids:
             raise ValueError('MP 未找到任何候选结构。')
@@ -172,7 +180,7 @@ def fetch_all_mp(api_key: str, elements: list[str], *, include_gnome: bool = Tru
                 docs = mpr.materials.search(material_ids=batch,
                     fields=['material_id', 'entries'], chunk_size=100)
                 for d in docs:
-                    mid = _scalar(_value(d, 'material_id'))
+                    mid = material_id_legacy(_value(d, 'material_id'))
                     if mid not in summaries:
                         continue
                     ent = _value(d, 'entries') or {}
@@ -193,7 +201,7 @@ def fetch_all_mp(api_key: str, elements: list[str], *, include_gnome: bool = Tru
                     chunk_size=100,
                 )
                 for d in docs:
-                    mid = _scalar(_value(d, 'material_id'))
+                    mid = material_id_legacy(_value(d, 'material_id'))
                     if mid not in summaries:
                         continue
                     scheme = _scalar(_value(d, 'thermo_type'))
@@ -207,7 +215,7 @@ def fetch_all_mp(api_key: str, elements: list[str], *, include_gnome: bool = Tru
                         energy_per_atom=float(e), mp_id=mid,
                         energy_source='thermo_corrected', method=scheme,
                         evidence=s['evidence'], experimental_flag=s['experimental_flag'],
-                        spacegroup=s['spacegroup'],
+                        spacegroup=s['spacegroup'], mp_id_api=s.get('api_id', mid),
                         correction_per_atom=(float(e) - float(u)) if u is not None else None,
                         note=f'MP thermo scheme, selected energy type: {_scalar(_value(d, "energy_type"))}',
                     ))
@@ -222,6 +230,8 @@ def fetch_all_mp(api_key: str, elements: list[str], *, include_gnome: bool = Tru
         'n_mp_nonstarred': sum(v['experimental_flag'] is False for v in summaries.values()),
         'n_mp_flag_unknown': sum(v['experimental_flag'] is None for v in summaries.values()),
         'n_energy_rows': len(unique),
+        'id_display': 'legacy numeric material_id; raw AlphaID preserved as mp_id_api',
+        'mp_database_version': mp_db_version,
         'include_gnome': include_gnome,
         'fetch_raw': fetch_raw, 'fetch_corrected': fetch_corrected,
         'note': 'No API key stored. MP star (experimentally observed) = summary.theoretical is False; all = no theoretical filter. '
@@ -236,7 +246,7 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
     Task energies from relaxations/statics and alternative POTCARs may not share
     a single consistent thermodynamic energy scale. Never add automatically to LP.
     """
-    mids = list(dict.fromkeys(x.strip() for x in material_ids if x.strip()))
+    mids = list(dict.fromkeys(material_id_legacy(x.strip()) for x in material_ids if x.strip()))
     if not mids or len(mids) > limit:
         raise ValueError(f'请选择 1–{limit} 个 MP ID 查询计算任务')
     from mp_api.client import MPRester
@@ -246,7 +256,7 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
         task_to_mat = {}
         for d in core:
             for task_id in _value(d, 'task_ids', []) or []:
-                task_to_mat[_scalar(task_id)] = _scalar(_value(d, 'material_id'))
+                task_to_mat[task_id_legacy(task_id)] = material_id_legacy(_value(d, 'material_id'))
         if len(task_to_mat) > 1500:
             raise ValueError('任务超过 1500 个；请缩小到更少 MP ID 查询')
         for batch in _batches(list(task_to_mat), 35):
@@ -254,7 +264,8 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
                 fields=['task_id', 'run_type', 'task_type', 'state', 'input', 'output'],
                 chunk_size=100)
             for d in docs:
-                tid = _scalar(_value(d, 'task_id'))
+                tid_api = _scalar(_value(d, 'task_id'))
+                tid = task_id_legacy(tid_api)
                 inp = _value(d, 'input')
                 out = _value(d, 'output')
                 raw = _value(out, 'energy_per_atom')
@@ -266,7 +277,8 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
                     except (ValueError, KeyError, TypeError):
                         pass
                 rows.append({
-                    'material_id': task_to_mat.get(tid, ''), 'task_id': tid,
+                    'material_id': task_to_mat.get(tid, ''),
+                    'task_id': tid, 'task_id_api': tid_api,
                     'run_type': _scalar(_value(d, 'run_type')),
                     'task_type': _scalar(_value(d, 'task_type')),
                     'state': _scalar(_value(d, 'state')),
@@ -276,3 +288,35 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
                     'use_in_lp': False,
                 })
     return rows
+
+
+def verify_material_id(api_key: str, identifier: str) -> dict:
+    """Resolve an MP material number, regardless of numeric/alpha spelling.
+
+    Does not assume a task identifier is a material identifier; task linkage
+    may be checked separately in the MP tasks endpoint.
+    """
+    from mp_api.client import MPRester
+    key = api_key.strip()
+    if not key:
+        raise ValueError('请先输入 MP API Key')
+    query_id = material_id_legacy(identifier.strip())
+    with MPRester(api_key=key, use_document_model=False) as mpr:
+        docs = mpr.materials.summary.search(
+            material_ids=[query_id],
+            fields=['material_id', 'formula_pretty', 'theoretical', 'symmetry'],
+        )
+        if not docs:
+            raise ValueError('MP summary 未检索到这个材料 ID；可能输入的是 task ID，或材料记录已更改。')
+        doc = docs[0]
+        api_mid = _scalar(_value(doc, 'material_id'))
+        mid = material_id_legacy(api_mid)
+        flag = _value(doc, 'theoretical')
+        return {
+            'material_id': mid,
+            'api_material_id': api_mid,
+            'formula': str(_value(doc, 'formula_pretty') or ''),
+            'spacegroup': str(_value(_value(doc, 'symmetry'), 'symbol') or ''),
+            'starred': (flag is False) if isinstance(flag, bool) else None,
+            'url': material_url(mid),
+        }
