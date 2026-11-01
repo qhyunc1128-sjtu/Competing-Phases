@@ -45,9 +45,21 @@ class Thermo:
 
 class Tasks:
     def search(self, **kwargs):
+        # Mimic the real MP API: disallow the nonexistent `state` field.
+        supported = {'nsites', 'elements', 'nelements', 'composition',
+                     'composition_reduced', 'formula_pretty', 'formula_anonymous',
+                     'chemsys', 'volume', 'density', 'density_atomic', 'symmetry',
+                     'batch_id', 'calc_type', 'completed_at', 'dir_name',
+                     'icsd_id', 'input', 'last_updated', 'orig_inputs', 'output',
+                     'run_type', 'structure', 'tags', 'task_id', 'task_type',
+                     'transformations', 'vasp_objects', 'vasp_version'}
+        unexpected = set(kwargs['fields']) - supported
+        if unexpected:
+            raise ValueError(f"invalid fields requested: {sorted(unexpected)}")
         assert 'mp-149' in kwargs['task_ids']
         return [{'task_id':'aaaaaaft', 'run_type':'GGA', 'task_type':'Static',
-                 'state':'successful','input':{}, 'output':{'energy_per_atom':-5.4}}]
+                 'calc_type':'GGA Static', 'completed_at':'2026-10-01T00:00:00',
+                 'input':{}, 'output':{'energy_per_atom':-5.4}}]
 
 
 class Mat:
@@ -103,6 +115,9 @@ def test_task_audit_joins_new_format_to_legacy(monkeypatch):
     assert audit[0]['material_id']=='mp-149'
     assert audit[0]['task_id']=='mp-149'
     assert audit[0]['task_id_api']=='aaaaaaft'
+    assert audit[0]['calc_type']=='GGA Static'
+    assert audit[0]['completed_at']=='2026-10-01T00:00:00'
+    assert 'state' not in audit[0]
 
 
 def test_verify_material_id_api(monkeypatch):

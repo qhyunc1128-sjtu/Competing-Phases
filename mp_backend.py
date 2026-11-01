@@ -260,8 +260,12 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
         if len(task_to_mat) > 1500:
             raise ValueError('任务超过 1500 个；请缩小到更少 MP ID 查询')
         for batch in _batches(list(task_to_mat), 35):
+            # MP Tasks endpoint exposes task_type, calc_type, completed_at etc.
+            # It does NOT expose a `state` field (Tasks and old API schema differ).
+            # Request only fields available in the current official TaskDoc API.
             docs = mpr.materials.tasks.search(task_ids=batch,
-                fields=['task_id', 'run_type', 'task_type', 'state', 'input', 'output'],
+                fields=['task_id', 'run_type', 'task_type', 'calc_type',
+                        'completed_at', 'input', 'output'],
                 chunk_size=100)
             for d in docs:
                 tid_api = _scalar(_value(d, 'task_id'))
@@ -281,7 +285,8 @@ def fetch_task_audit(api_key: str, material_ids: list[str], limit: int = 20) -> 
                     'task_id': tid, 'task_id_api': tid_api,
                     'run_type': _scalar(_value(d, 'run_type')),
                     'task_type': _scalar(_value(d, 'task_type')),
-                    'state': _scalar(_value(d, 'state')),
+                    'calc_type': _scalar(_value(d, 'calc_type')),
+                    'completed_at': _scalar(_value(d, 'completed_at')),
                     'energy_eV_per_atom': raw,
                     'potcar': _potcar_text(_value(inp, 'potcar_spec')),
                     'hubbards': _hubbards_text(_value(inp, 'hubbards')),
