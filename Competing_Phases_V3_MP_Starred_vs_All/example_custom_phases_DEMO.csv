@@ -1,0 +1,3 @@
+formula,energy_per_atom,method,mp_id,evidence,spacegroup,potcar,note
+Mo3Si,-9.0,PBE-custom,my-001,unknown,Pm-3n,PAW_PBE,DEMO ONLY - replace with same-method DFT results
+MoB,-8.0,PBE-custom,my-002,unknown,Cmcm,PAW_PBE,DEMO ONLY - replace with same-method DFT results
