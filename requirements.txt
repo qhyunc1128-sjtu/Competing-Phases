@@ -2,5 +2,6 @@ streamlit>=1.42,<2
 mp-api>=0.45,<1
 pymatgen>=2025.1,<2028
 scipy>=1.11,<2
-pandas>=2.0,<3
 numpy>=1.26,<3
+pandas>=2,<3
+pytest>=8,<10

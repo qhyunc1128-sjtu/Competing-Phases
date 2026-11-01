@@ -1,93 +1,92 @@
-# PhaseMatch | Materials Project 竞争相能量在线计算
+# Competing Phases V3 — MP ★ vs All (0 K DFT)
 
-**开源部署版**：每位访问者通过网页输入自己的 Materials Project API Key，无需本地安装 Python 或其他软件。网站后台自动获取完整化学体系和各子体系的 MP 相图兼容条目，计算最低能竞争相分解组合、能量差、反应式配平，并提供 CSV / JSON 下载。
+本项目是 **Streamlit 在线竞争相能量计算程序**。每位用户在网页内输入自己的 Materials Project（MP）API Key、目标组成和 0 K DFT 总能；无需自行安装 Python 环境。数据和任务记录可以导出 CSV / JSON。
 
-> 注意：本代码包是“可直接部署”的网站源代码，不是已经上线的网站。网站拥有者需要将代码发布到 GitHub，再使用 Streamlit Community Cloud 托管，才能获得可公开访问的 `https://<name>.streamlit.app` 网址。
+## 本版关键修改：只做两套 MP 候选集
 
-## 1. 零安装部署：浏览器中操作即可
+| 自动计算的候选集 | MP 规则 | 数据范围 |
+|---|---|---|
+| **A. MP ★ 实验观测结构** | `summary.theoretical is False` | Materials Explorer 中带星号（★）的 MP 结构（逐个 Material ID 判断） |
+| **B. 全部 MP 结构** | 不根据 `theoretical` 过滤 | MP 检索到的全部结构，包括 ★、理论预测与来源未标明结构 |
 
-1. 登录 [GitHub](https://github.com/new)，新建一个仓库，例如 `phasematch`，可设为 Public。
-2. 解压本 ZIP，**把压缩包最外层的文件**上传到仓库根目录（`app.py`、`phase_core.py`、`mp_backend.py`、`requirements.txt`、`tests/` 等）。不要把 ZIP 文件直接上传指望服务自动解压。仓库可以先只上传四个 Python/依赖文件，`.streamlit/config.toml` 是可选的风格配置。
-3. 打开 [Streamlit Community Cloud](https://share.streamlit.io/)，用 GitHub 登录，选 **Create app**，选仓库与 `main` 分支，**Main file path** 填 `app.py`。选择适合的 Python 版本（推荐 **3.11**）。点击 Deploy。
-4. 部署完成后会得到 `https://你的自定义名称.streamlit.app`。将链接分享给同事；他们打开后输入自己的 API Key，选择材料，完成计算。**每个使用者都不需要安装任何环境。**
+**两组使用同一批 MP 检索结果、相同的目标 DFT 能量、元素守恒公式及相同的能量数据集。** 对每个可用的能量来源/方法（例如 core_raw/GGA、core_raw/r2SCAN、thermo_corrected/GGA_GGA+U），分别求出两套最低能竞争相组合及目标相与其的能量差。不同泛函与能量修正方案**不混合**。
 
-由托管平台负责安装 `requirements.txt` 中的依赖。访问者只需浏览器，开发者无需维护自己的服务器。
+⚠️ **星号含义：** 根据 MP 官方社区，Materials Explorer 的星号代表 *Experimentally Observed*，API `theoretical=False`；它说明该 MP 晶体结构与实验数据库结构相匹配，**不是说 MP 中的 DFT 能量是实验测量结果**。`theoretical=True` 和未知标记不会进入 A 组。不能仅凭一个化学式判断所有晶型都属于实验组。
 
-部署官方教程：https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy
+⚠️ **覆盖范围：** “全部 MP”是本次选定 MP 数据源中可检索到的全部材料条目，不意味着包括自然界/理论上一切可能相。可选勾选 `include_gnome` 以扩大 MP 搜索范围；勾选与否对 A、B 两组使用同一设置。默认关闭 GNoMe 扩展，以便和常规 MP Materials Explorer 对齐。
 
-## 2. 网页操作
+## 直接更新你已有的 Streamlit 网站
 
-1. 输入 `Mo5SiB2`、`Mo4TiSiB2`、`Mo4.5Ti0.5SiB2`、`(Mo0.8Ti0.2)5SiB2` 等有效化学式。
-2. 选择 **形成能 eV/atom**，或者 **VASP / DFT 总能 eV + 实际晶胞原子数 + 同一 DFT 设置下的单质参考能 eV/atom**。
-3. 选择 MP thermo type：`GGA_GGA+U`、`GGA_GGA+U_R2SCAN` 或 `R2SCAN`。
-4. 在密码框输入你自己的 [MP API Key](https://materialsproject.org/api)，点击 **从 Materials Project 检索全部竞争相**。
-5. 查询完成后显示两种最小能分解组合、各相 ID/形成能/摩尔化学计量系数、能量差以及 CSV/JSON 导出。修改目标 DFT 形成能后可直接复用本次查询结果。
+仓库地址（以实际 GitHub 仓库为准）：`qhyunc1128-sjtu/Competing-Phases`。
 
-支持离线上传之前导出的相库 JSON。在没有连接 API 时，也能用同一批数据分析不同目标比例。
+1. 解压 `Competing_Phases_V3_MP_Starred_vs_All.zip`。
+2. 把**解压目录内部的文件**上传/更新到已有 GitHub 仓库的 `main` 分支。务必替换旧版 `app.py`、`phase_core.py`、`mp_backend.py`、`README.md` 和测试文件；保留 `formula_utils.py` 与 `requirements.txt`，上传 `.streamlit/config.toml` 以保留界面设置。
+3. GitHub 提交变更后 Streamlit Community Cloud 会重新部署；若未自动更新可从应用管理面板选择 Reboot。
+4. 部署入口仍是 **`app.py`**，不要修改为 `streamlit_app.py`。
+5. 打开网站，在左侧输入个人 MP API Key，填入化学式、DFT 能量和胞内原子数，然后点击 **从 MP 下载当前元素体系**。
+6. 在 **4 · 自动对比两组最低能竞争相（★ vs 全部 MP）** 选择各数据体系，点击 **计算所有选定情景**。网页会同时显示 A/B 两组的竞争相、配平结果及能量差。
 
-## 3. 计算原理（重要）
+## 能量计算（严格按用户定义）
 
-基于输入化学式中的元素，拉取所选 MP 热力学方案的相及其所有子体系，利用 `pymatgen.analysis.phase_diagram.PhaseDiagram` 提取基于同一组 MP 单质参考的兼容形成能，随后使用 HiGHS 线性规划求解：
-
-\[
-E_{\mathrm{comp}}^{f}=\min_{y_j\ge0}\sum_j y_j\,\Delta H_{f,j}
-\quad \mathrm{s.t.}\quad \sum_j y_j x_{ij}=x_{i,\mathrm{target}}.
-\]
-
-其中 `y_j` 是第 j 个竞争相贡献的原子比例，`x_ij` 是对应竞争相中元素 i 的原子分数；结果可以换算为配平的竞争相系数。
+针对目标化学式中各元素的原子分数 \(x_i^0\)，各竞争相 \(j\) 的每原子 **0 K DFT 总能** \(e_j=E_j^{cell}/N_j\)。用线性规划求：
 
 \[
-\Delta E=\Delta H_{f,\mathrm{target}}^{\mathrm{own}}-E_{\mathrm{comp}}^{f}.
+E_{\mathrm{comp}}^{\min}=\min_{w_j\ge0}\sum_jw_je_j,\qquad
+\sum_jw_jx_{ij}=x_i^0.
 \]
 
-- **完整 MP 凸包**：保留已知同组成相/多晶型；含 MP 已知目标本身的最低能参照。
-- **排除同组成**：移除所有相同原子比例的 MP 记录，评估由异组成相分解时的最低能量；**不等于标准 E above hull**。
-- 正的 `ΔE` 表示输入目标能量在参照线之上，负值表示低于参照线（不自动等于热力学稳定）。
-- 若采用总能模式，先计算 `ΔHf_target = E_total/N - Σ x_i E_element,i`；**不能直接减去 MP 的原始 DFT 总能**。
-- 个人 VASP 形成能与 MP 修正形成能可能存在泛函、U、PAW、校正方法差异。此工具结果首先是*近似跨数据库筛选*，论文定量结论建议用相同 DFT 设置重新计算相关竞争相。
-- 当前为 **0 K 固相能量模型**，不包含 Gibbs 自由能、温度、气氛氧分压、相变动力学或构型熵。
+所有元素的约束同时保证 \(\sum_jw_j=1\)。**不先把竞争相能量转为相对于单质的形成能**。
 
-## 4. API Key 安全说明
+目标相输入可以是每计算胞总能（eV/cell）或每原子能量（eV/atom）；计算胞总能除以其真实原子数 \(N_{target}\) 归一化。定义：
 
-- **每位访问者用自己的 MP Key**，不共用网站作者的 Key。
-- Key 使用 Streamlit 的 `type="password"` 控件输入，**不会嵌入公开代码、URL 参数、导出 CSV/JSON 或应用自建数据库**。
-- Key 在本次会话中传递到网站托管服务器，由服务器向 Materials Project 官方 API 发送请求。因此**网站运营者和托管服务处于信任边界内**，不宜在不可信网页粘贴任何密钥；密码遮挡不意味着端到端保密。
-- 程序不提供磁盘日志输出用户密钥，不对密钥进行跨用户缓存；用户可点击“清除当前会话的相库和 Key”。
-- **如果某个 MP API Key 已经暴露在公开对话或论坛，建议在 MP 账户里更换/重新生成，并使用新 Key。**
+\[
+\Delta e_{\mathrm{A}}=e_{\mathrm{target}}-E_{\mathrm{comp,A}}^{\min},\quad
+\Delta e_{\mathrm{B}}=e_{\mathrm{target}}-E_{\mathrm{comp,B}}^{\min}.
+\]
 
-## 5. 管理员可选本地测试
+输出 eV/atom、meV/atom、eV/cell（使用目标实际计算胞原子数）。正值表示目标相相对于该组最低竞争相**能量更高**，负值表示更低；这是有符号竞争相能量差，不等于 MP 网站上非负 `energy above hull` 的通常定义。
 
-只有网站部署者开发/排错时才需要：
+**额外的 A/B 对比量**：
+
+\[
+\Delta E_{\mathrm{lowering}}=E_{\mathrm{comp,A}}^{\min}-E_{\mathrm{comp,B}}^{\min}\ge0
+\]
+
+两组都可配平、采用同一能量体系并成功求解时，全部 MP 集合包含实验 ★ 集合，故该值理论上不小于 0；它反映额外引入理论/未知结构导致的最低竞争相能量降低。
+
+## 多种 DFT 计算与记录
+
+- `MP core raw`：保留每个 MP 材料、每种可用 `run_type` 的代表原始计算能量，不采用 MP 兼容性修正；尽可能展示计算胞原子数、eV/cell、eV/atom、POTCAR、Hubbard U、任务 ID。
+- `MP thermo corrected`：保留官方热力学方案的兼容性修正能量，**分开计算**、不与 raw 混用。
+- **全部 tasks 审计**：对选中的少量 MP IDs 查询相关优化/静态任务，列出不同任务的能量与方法（仅用于审计，不直接加入最低能优化，以免混入不可比任务）。
+- 默认同组检测 POTCAR 冲突；发现相同元素不同 POTCAR 时阻止该情景运行，可自主关闭严格校验以进行探索性比较。
+
+MP 原始 DFT 数据与用户自己 VASP 目标相可能使用不同 PAW 赝势、泛函、U、磁有序设置。即使都属于 GGA，**直接相减也可能产生不可忽略的系统误差**，应在科研论文中核对一致性。MP `thermo_corrected` 是另一能量体系，与未经相同兼容性校正的个人原始 VASP 总能不能视为严格同尺度。
+
+## 自定义 CSV 与安全
+
+保留导入自算竞争相能量的 CSV 和下载 JSON 功能。但为了保证本版 **MP ★** 和 **全部 MP** 的统计定义，`user_custom` 条目不会自动并入上述两组；自定义数据需单独核算，不能伪装成 MP ★ 条目。用户的密钥不会写入代码、版本库、导出文件或持久缓存。
+
+CSV 示例（能量仅作格式示意，**非真实 MP 数据**）：
+
+```csv
+formula,energy_per_atom,method,mp_id,evidence,spacegroup,potcar,note
+Mo3Si,-9.0,PBE-custom,custom-001,unknown,Pm-3n,PAW_PBE,DEMO ONLY
+MoB,-8.0,PBE-custom,custom-002,unknown,Cmcm,PAW_PBE,DEMO ONLY
+```
+
+## 本地开发（网站用户不用操作）
 
 ```bash
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 streamlit run app.py
+pytest -q
 ```
 
-自带数值与 MP 适配接口的脱网单元测试：
+本次版本经过 **17 项离线 / 模拟 MP 客户端测试**，验证星号分类、未知标记排除、同化学式不同 MP ID、线性规划配平与能量归一化。**没有使用真人 API Key 进行真实在线联调**，最终端点和响应字段需在已部署的 Streamlit Cloud 上测试。
 
-```bash
-python -m unittest discover -s tests -v
-```
+## MP 官方来源
 
-测试只覆盖计算逻辑和模拟 API 响应；上线前仍应使用有效密钥与官方 MP 服务器做一次真实检索。
-
-## 6. 文件布局
-
-```text
-app.py                    # Streamlit UI / 每人输入自己的 API Key
-phase_core.py             # 化学式解析、线性规划、DFT 形成能和输出
-mp_backend.py             # mp-api 接口及相图形成能统一处理
-requirements.txt          # 托管平台自动安装依赖
-.streamlit/config.toml     # 网页主题
-.gitignore                # 避免提交私密文件/缓存
-tests/                    # 计算与 API 适配测试
-README.md                 # 本文档
-LICENSE                   # MIT
-```
-
-### 官方资料
-
-- [Materials Project API](https://docs.materialsproject.org/downloading-data/using-the-api/getting-started)
-- [mp-api `get_entries_in_chemsys`](https://materialsproject.github.io/api/_autosummary/mp_api.client.mprester.MPRester.html)
-- [Streamlit Community Cloud 部署](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy)
+- [Obtain star materials — MP 开发人员说明](https://matsci.org/t/obtain-star-materials/51386)
+- [Experimental materials availability since 2016 — Star 对应实验观测结构](https://matsci.org/t/experimental-materials-availability-since-2016/54006)
+- [MP Summary API：theoretical 字段](https://materialsproject.github.io/api/_modules/mp_api/client/routes/materials/summary.html)
